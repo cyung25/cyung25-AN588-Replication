@@ -1,0 +1,205 @@
+---
+title: "cyung25_AN588_Replication"
+author: "Charles Yung"
+date: "`r Sys.Date()`"
+output: html_document
+---
+To start off, the study I am intending to replicate by Clement et al. explores how guppies from either the Aripo or Turure Rivers in Trinidad and Tobago make collective decisions concerning foraging for food in the wild. Specifically, this study compares guppies facing high vs low predation pressure to see how group settings affected their foraging decision accuracy and sampling activity. 
+
+Two important variables in this study are decision accuracy- measured as a ratio of approaches of fish towards an edible stimulus- and sampling activity- the total number of recorded approaches made by an individual fish. Experimental trials were conducted in both low and high predation sites, and accuracy and activity were recorded both for individuals known as "singletons" in this dataset and those in groups. 
+
+The original paper and the full dataset used for both the paper and this replication attempt are uploaded to the assignment repository in pdf form and csv form respectively. Within my replication, I compared the effects of social grouping (Group vs. Single) on guppy decision making behavior, measuring proportion of correct stimulus approaches and total number of approaches. The original study classified data by predation level and accuracy of first approach which was something that was held consistent within this replication. 
+
+For each barplot within my replication, I conducted independent sample t-tests comparing the two differnt trial treatments. Within the barplots there are error bars present which represent the standard error of the mean. Each barplot's p-value was also compiled into a summary table for clarity to compare with intended values. Attatched is the image of replication below: 
+
+
+Begin replication. I loaded readr, dplyr, and tidyverse for data cleaning and manipulation, curl to access my dataset from my repository, sciplot and ggplot2 for plotting and visualization of my barplot, and gridextra to arrange my plots into a grid layout just like in the figure. I also will display the first several rows of the data as well as the structure and the summary statistics to start off. 
+```{r}
+library(readr)  # or use base R's read.csv
+library(curl)
+library(sciplot)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(gridExtra)
+f <- curl("https://raw.githubusercontent.com/cyung25/cyung25-AN588-Replication/4ac129352d5dd0bcea4d985541f6701ee192760e/GuppyDecisionMaking.csv")
+data <- read.csv(f, header = TRUE, sep = ",", stringsAsFactors = FALSE)
+head(data)         # View the first few rows
+str(data)          # Check structure and data types
+summary(data)
+```
+
+Now that we have the dataset loaded in, will use names(data) to rename our column names of interest within our dataset to more manageable names that will be within the plot. I also used a data_clean pipe function to remove all my NA values within the dataset. To critique myself I am not certain that the original authors did this so this can be a reason why my values are different. One very important aspect that threw me off for a while at first was to rename the "singleton" values within my dataset as "Single" within my code, essentially making sure R recognizes every "singleton" value as a single fish. This really was important for my grouping checks which will come later on. 
+
+```{r}
+names(data)[names(data) == "Predation.level"] <- "Predation"
+names(data)[names(data) == "Group.or.single"] <- "Trial_Type"
+names(data)[names(data) == "Number.of.approaches.to.the.True.stimulus"] <- "True"
+names(data)[names(data) == "Number.of.approaches.to.the.False.stimulus"] <- "False"
+names(data)[names(data) == "First.approach..to.True.or.False.stimulus."] <- "First_Approach"
+
+data$Trial_Type <- trimws(data$Trial_Type)
+data$Trial_Type <- str_to_title(data$Trial_Type) # ensures uniform formatting 
+
+
+data_clean <- data %>%
+  filter(
+    !is.na(True),
+    !is.na(False),
+    !is.na(Trial_Type),
+    !is.na(Predation),
+    !is.na(First_Approach)
+  ) 
+
+
+data_clean$Accuracy <- data_clean$True / (data_clean$True + data_clean$False)
+data_clean$Activity <- data_clean$True + data_clean$False
+data_clean$First_Correct <- tolower(data_clean$First_Approach) == "t"
+
+data_clean$Trial_Type <- tolower(data_clean$Trial_Type)
+data_clean$Trial_Type <- ifelse(data_clean$Trial_Type == "singleton", "Single",
+                                ifelse(data_clean$Trial_Type == "group", "Group", NA))
+data_clean$Trial_Type <- factor(data_clean$Trial_Type, levels = c("Single", "Group"))
+
+data_clean$Panel <- paste(data_clean$Predation,
+                          ifelse(data_clean$First_Correct, "First correct", "First incorrect"))
+
+print(unique(data_clean$Panel))
+```
+
+We have our four trial groups. High first incorrect = trial had high predation, incorrect first choice. High first correct = high predation, correct first choice. Low first incorrect = low predation, incorrection first choice. Low first correct = low predation, correct first choice. 
+
+
+Now let's return all unique values in the Trial_Type column, confirming that the trial types are cleaned and standardized, and all our values are ordered to be within either the "Single" or "Group" within our plots. 
+
+```{r}
+unique(data_clean$Trial_Type)
+
+unique(data$Group.or.single)
+names(data)
+```
+We confirmed our treatment groups and we also got back our column names in our original dataset. 
+Next, it is time to generate our barplots. Half of our barplots will be measuring accuracy and half will be measuring activity. However, we must also consider combinations which form unique data conditions, which is accounted for with the panel_levels command. Furthermore, for each panel I ran independent sample t-tests comparing accuracy and activity using the tryCatch command to avoid stopping on data errors (NA values and other discrepancies).
+```{r, warning=FALSE}
+accuracy_plots <- list()
+activity_plots <- list()
+
+panel_levels <- unique(data_clean$Panel)
+
+
+for (i in seq_along(panel_levels)) {
+  panel_name <- panel_levels[i]
+  panel_data <- data_clean[data_clean$Panel == panel_name, ]
+  
+
+  
+  # t-tests — allow NA handling
+  acc_ttest <- tryCatch(
+    t.test(Accuracy ~ Trial_Type, data = panel_data),
+    error = function(e) NULL
+  )
+  act_ttest <- tryCatch(
+    t.test(Activity ~ Trial_Type, data = panel_data),
+    error = function(e) NULL
+  )
+  
+  # Extract p-values safely
+  acc_pval <- if (!is.null(acc_ttest)) signif(acc_ttest$p.value, 3) else "NA"
+  act_pval <- if (!is.null(act_ttest)) signif(act_ttest$p.value, 3) else "NA"
+
+  
+  # Max y for annotation
+  y_max_acc <- max(panel_data$Accuracy, na.rm = TRUE)
+  y_max_act <- ceiling(max(panel_data$Activity, na.rm = TRUE))
+  
+  
+  acc_plot <- ggplot(panel_data, aes(x = Trial_Type, y = Accuracy, fill = Trial_Type)) +
+    geom_bar(stat = "summary", fun = "mean", width = 0.6) +
+    stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +
+    scale_fill_manual(values = c("Single" = "black", "Group" = "gray")) +
+    labs(title = paste("Accuracy -", panel_name),
+       y = "Prop of Correct Approaches", x = "Trial Type") +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    annotate("text", x = 1.5, y = 1.05, label = paste("p =", acc_pval)) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 5, hjust = 0.5), axis.text.y = element_text(size = 6))
+  
+  act_plot <- ggplot(panel_data, aes(x = Trial_Type, y = Activity, fill = Trial_Type)) +
+    geom_bar(stat = "summary", fun = "mean", width = 0.6) +
+    stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +
+    scale_fill_manual(values = c("Single" = "black", "Group" = "gray")) +
+    labs(title = paste("Activity -", panel_name),
+         y = "Total Number of Approaches", x = "Trial Type") +
+    scale_y_continuous(limits = c(0, 4), breaks = seq(0, 4, 0.5)) +
+    annotate("text", x = 1.5, y = 4.05, label = paste("p =", act_pval)) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 5, hjust = 0.5),  axis.text.y = element_text(size = 6))
+
+  accuracy_plots[[length(accuracy_plots)+1]] <- acc_plot
+  activity_plots[[length(activity_plots)+1]] <- act_plot
+
+}
+
+library(gridExtra)
+
+grid.arrange(
+  grobs = c(accuracy_plots, activity_plots),
+  nrow = 2,
+  top = "Accuracy and Activity by Trial Type, Predation, and First Choice"
+)
+
+ggsave("guppy_barplots.pdf", width = 12, height = 8)
+```
+
+With the t-tests comparing the mean performance between Group and Single guppies in each condition, we have now created two bar plots for each panel. Each barplot uses ggplot2 with stat_summary to show mean and SE. On a personal note, it took a bit of troubleshooting to get my axes to all fit, so I had to use the element_text and axis.test.y commands to make my data readable. 
+
+Another troubleshooting note I need to add is that for an embarassingly long time the "Single" values on the barplot were labeled as "NA." This would happen intermittently with extra random empty barplots appearing when I tried to troubleshoot. After a while I realized that all the "Single" values in the original dataset were labeled as "singleton" which is accounted for now in my data clean within the first chunk. 
+
+Finally, to check if we have a successful replication we will create a p-value table to report the values from t-tests comparing Accuracy and Activity across our different trial types (Single vs group fish). These tests are performed separately for each panel where a panel is a unique combination of predation level and whether or not the guppy made the correct first choice. 
+
+```{r}
+p_values_table <- data.frame(
+  Panel = character(),
+  Accuracy_p_value = numeric(),
+  Activity_p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+
+panel_levels <- unique(data_clean$Panel)
+for (i in seq_along(panel_levels)) {
+  panel_name <- panel_levels[i]
+  panel_data <- data_clean[data_clean$Panel == panel_name, ]
+  
+  
+  acc_ttest <- tryCatch(
+    t.test(Accuracy ~ Trial_Type, data = panel_data),
+    error = function(e) NULL
+  )
+  act_ttest <- tryCatch(
+    t.test(Activity ~ Trial_Type, data = panel_data),
+    error = function(e) NULL
+  )
+  
+  
+  acc_pval <- if (!is.null(acc_ttest)) signif(acc_ttest$p.value, 3) else NA
+  act_pval <- if (!is.null(act_ttest)) signif(act_ttest$p.value, 3) else NA
+  
+
+  p_values_table <- rbind(p_values_table, data.frame(
+    Panel = panel_name,
+    Accuracy_p_value = acc_pval,
+    Activity_p_value = act_pval,
+    stringsAsFactors = FALSE
+  ))
+}
+
+
+print(p_values_table)
+```
+
+We now have our summary table. Remember High first incorrect = trial had high predation, incorrect first choice. High first correct = high predation, correct first choice. Low first incorrect = low predation, incorrect first choice. Low first correct = low predation, correct first choice. 
+
+Unfortunately, our p-values from our replication were slightly skewed from the original p-values. Some factors as to why my p-values were off and my replication wasn't exact could include not processing the NA values correctly, and perhaps having different numbers of observations within my data panel as the researchers. Another plausible reason why my replication values were skewed could have been because I analyzed the trial type group effects within each data panel so certain effects from modeling different variable interactions may not be shown. It is also possible that certain terms in my dataset and my code were mislabeled, which could be another source for error. Ultimately, in reflection this assignment teaches the complexity and nuance of replicating a figure from an open-source dataset. 
